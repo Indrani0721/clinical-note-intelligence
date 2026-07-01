@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+
+  # PostgreSQL database container
+  db:
+    image: postgres:15
+    # Why restart: unless-stopped?
+    # If the container crashes, Docker restarts it automatically
+    # Only stops if you manually stop it
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clinical_notes_db
+      POSTGRES_USER: clinical_user
+      POSTGRES_PASSWORD: clinical_pass
+    ports:
+      - "5432:5432"
+    # Why volumes?
+    # Containers are stateless — when they stop, data disappears
+    # A volume persists data outside the container
+    # Without this, your database resets every time Docker restarts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Why healthcheck?
+    # Your app container needs the database ready before starting
+    # This checks every 5 seconds if PostgreSQL is accepting connections
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clinical_user -d clinical_notes_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Your application container
+  app:
+    # Build from your Dockerfile in the current directory
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # FastAPI
+      - "8501:8501"   # Streamlit
+    environment:
+      # Why reference db here?
+      # Inside Docker, containers talk to each other by service name
+      # "db" is the service name above — Docker resolves it automatically
+      # This replaces "localhost" which wouldn't work between containers
+      DATABASE_URL: postgresql://clinical_user:clinical_pass@db/clinical_notes_db
+      GROQ_API_KEY: ${GROQ_API_KEY}
+    # Why depends_on with condition?
+    # Waits for PostgreSQL to be healthy before starting your app
+    # Without this, your app might start before the database is ready
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
