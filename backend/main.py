@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.extractor import extract_clinical_note
 from backend.evaluator import evaluate_extraction
-from backend.database import get_db, save_note_record, init_db
+from backend.database import get_db, save_note_record, init_db, ClinicalNoteRecord
 import json
 
 app = FastAPI(
@@ -89,3 +89,77 @@ def get_notes_needing_review(db: Session = Depends(get_db)):
         }
         for r in records
     ]
+
+@app.get("/analytics")
+def get_analytics(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    import json
+    
+    total_notes = db.query(ClinicalNoteRecord).count()
+    
+    avg_confidence = db.query(
+        func.avg(ClinicalNoteRecord.overall_confidence)
+    ).scalar() or 0.0
+    
+    notes_needing_review = db.query(ClinicalNoteRecord).filter(
+        ClinicalNoteRecord.needs_human_review == True
+    ).count()
+    
+    records = db.query(ClinicalNoteRecord).all()
+    
+    confidence_by_date = {}
+    flagged_fields = {}
+    recent_notes = []
+    
+    for record in records:
+        date_key = record.created_at.strftime("%Y-%m-%d")
+        if date_key not in confidence_by_date:
+            confidence_by_date[date_key] = []
+        if record.overall_confidence:
+            confidence_by_date[date_key].append(record.overall_confidence)
+        
+        if record.evaluation_data:
+            try:
+                evaluation = json.loads(record.evaluation_data)
+                fields = [
+                    "patient_age", "patient_sex", "chief_complaint",
+                    "diagnoses", "current_medications", "new_medications",
+                    "followup", "referrals", "risk_level"
+                ]
+                for field in fields:
+                    if field in evaluation:
+                        if evaluation[field].get("flag"):
+                            flagged_fields[field] = flagged_fields.get(field, 0) + 1
+            except:
+                pass
+        
+        recent_notes.append({
+            "note_id": str(record.id)[:8] + "...",
+            "overall_confidence": record.overall_confidence or 0,
+            "needs_human_review": record.needs_human_review,
+            "created_at": record.created_at.isoformat()
+        })
+    
+    confidence_over_time = [
+        {
+            "date": date,
+            "avg_confidence": sum(scores) / len(scores)
+        }
+        for date, scores in confidence_by_date.items()
+        if scores
+    ]
+    
+    recent_notes = sorted(
+        recent_notes,
+        key=lambda x: x["created_at"],
+        reverse=True
+    )[:10]
+    
+    return {
+        "total_notes": total_notes,
+        "avg_confidence": float(avg_confidence),
+        "notes_needing_review": notes_needing_review,
+        "confidence_over_time": confidence_over_time,
+        "flagged_fields": flagged_fields,
+        "recent_notes": recent_notes
+    }
