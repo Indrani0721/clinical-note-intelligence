@@ -1,4 +1,5 @@
 # Clinical Note Intelligence System
+![CI](https://github.com/Indrani0721/clinical-note-intelligence/actions/workflows/ci.yml/badge.svg)
 
 An AI-powered pipeline that extracts structured data from unstructured clinical notes and evaluates its own output for accuracy — flagging low-confidence fields for human review.
 
